@@ -1,59 +1,58 @@
 import { NextResponse } from 'next/server'
-import { Exercise } from '../../../../types/exerciseTypes'
+import { Exercise } from '@/types/exerciseTypes'
 import { AppError, errorHandler } from "@/utils/error"
+import { exerciseStore } from '@/data/exercises'
 
 export const exercises: Exercise[] = [
   {
-    exerciseId: "squat_1",
-    meta: {
-      name: "Squat",
-      description: "Lower your hips until your thighs are parallel to the ground.",
-      image: "/exercises/squat_1.png",
-      validation: {
-        correct: "Good form! Keep your back straight and core engaged.",
-        incorrect: "Try to keep your back straight and go a bit lower."
-      },
-      difficulty: "beginner",
-      muscleGroups: ["quadriceps", "hamstrings", "glutes"],
-      equipment: "none"
+    "exerciseId": "squat_1",
+    "name": "Squat",
+    "description": "Lower your hips until your thighs are parallel to the ground.",
+    "image": "/exercises/squat_1.png",
+    "validation": {
+      "correct": "Good form! Keep your back straight and core engaged.",
+      "incorrect": "Try to keep your back straight and go a bit lower."
     },
-    calorieFormula: {
-      formula: "(0.00032 * bodyWeight * reps) / 30",
-      unit: "kcal",
-      variables: {
-        bodyWeight: "grams",
-        reps: "count"
+    "difficulty": "beginner",
+    "muscleGroups": ["quadriceps", "hamstrings", "glutes"],
+    "equipment": "none",
+    "calorieFormula": {
+      "formula": "(0.00032 * bodyWeight * reps) / 30",
+      "unit": "kcal",
+      "variables": {
+        "bodyWeight": "grams",
+        "reps": "count"
       }
     },
-    keyPoints: [
+    "keyPoints": [
       {
-        name: "leftLeg",
-        landmarks: [23, 25, 27],
-        type: "angle",
-        unit: "degrees"
+        "name": "leftLeg",
+        "landmarks": [23, 25, 27],
+        "type": "angle",
+        "unit": "degrees"
       },
       {
-        name: "rightLeg",
-        landmarks: [24, 26, 28],
-        type: "angle",
-        unit: "degrees"
+        "name": "rightLeg",
+        "landmarks": [24, 26, 28],
+        "type": "angle",
+        "unit": "degrees"
       }
     ],
-    thresholds: {
-      down: {
-        leftLeg: 90,
-        rightLeg: 90
+    "thresholds": {
+      "down": {
+        "leftLeg": 90,
+        "rightLeg": 90
       },
-      up: {
-        leftLeg: 160,
-        rightLeg: 160
+      "up": {
+        "leftLeg": 160,
+        "rightLeg": 160
       }
     },
-    countingLogic: {
-      type: "angle_threshold",
-      countOn: "up",
-      requirements: ["leftLeg", "rightLeg"],
-      resetOn: "down"
+    "countingLogic": {
+      "type": "angle_threshold",
+      "countOn": "up",
+      "requirements": ["leftLeg", "rightLeg"],
+      "resetOn": "down"
     }
   },
   {
@@ -263,17 +262,18 @@ export async function GET(request: Request) {
     const id = searchParams.get('id')
 
     if (!id) {
+      const exercises = exerciseStore.getAllExercises()
       return NextResponse.json(
-        exercises.map(({ exerciseId, name, description }) => ({
+        exercises.map(({ exerciseId, meta }) => ({
           exerciseId,
-          name,
-          description,
-          image: `/exercises/${exerciseId}.jpg`
+          name: meta.name,
+          description: meta.description,
+          image: meta.image
         }))
       )
     }
 
-    const exercise = exercises.find(ex => ex.exerciseId === id)
+    const exercise = exerciseStore.getExerciseById(id)
     if (!exercise) {
       throw new AppError('Exercise not found', 'EXERCISE_NOT_FOUND', 404)
     }

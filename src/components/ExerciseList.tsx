@@ -1,5 +1,5 @@
-import Link from "'next/link'"
-import { ExerciseConfig } from "'../types/exerciseTypes'"
+import Link from "next/link"
+import { ExerciseConfig } from "../types/exerciseTypes"
 
 interface ExerciseListProps {
   exerciseConfigs: ExerciseConfig[]

@@ -1,6 +1,6 @@
-import { ExerciseConfig, FitnessInsight } from "'../types/exerciseTypes'"
+import { Exercise, FitnessInsight } from "../types/exerciseTypes"
 
-export async function getExerciseConfigs(): Promise<ExerciseConfig[]> {
+export async function getExerciseConfigs(): Promise<Exercise[]> {
   const res = await fetch("'/api/exercise-config'")
   if (!res.ok) {
     throw new Error("'Failed to fetch exercise configurations'")

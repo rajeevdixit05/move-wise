@@ -1,9 +1,5 @@
-import { Exercise } from "@/types/exerciseTypes"
+import { Exercise, FitnessInsight } from "@/types/exerciseTypes"
 import { NormalizedLandmark } from "@mediapipe/tasks-vision"
-
-interface AcceptableRanges {
-  [key: string]: [number, number] // [min, max]
-}
 
 interface CalorieValues {
   [key: string]: number | string
@@ -15,12 +11,6 @@ export class ExerciseProcessor {
   private isInUpPosition: boolean = false
   private isInExtendedPosition: boolean = false
   private startTime: number = 0
-
-  // Configurable ranges for different exercises
-  private acceptableRanges: AcceptableRanges = {
-    leftArmDown: [80, 90],
-    leftArmUp: [120, 130]
-  }
 
   constructor(private exercise: Exercise) {}
 
@@ -62,6 +52,13 @@ export class ExerciseProcessor {
 
     // Calculate angles for all keypoints
     for (const keyPoint of this.exercise.keyPoints) {
+      if (keyPoint.type !== "angle") continue
+
+      // Skip if keypoint is not in requirements
+      if (!this.exercise.countingLogic.requirements.includes(keyPoint.name)) {
+        continue
+      }
+
       const landmarkPoints = keyPoint.landmarks
       const angle = this.calculateAngle(
         landmarks[landmarkPoints[0]],
@@ -70,36 +67,85 @@ export class ExerciseProcessor {
       )
       angles.set(keyPoint.name, angle)
 
-      const acceptableRange = this.acceptableRanges[keyPoint.name]
-      if (acceptableRange && (angle < acceptableRange[0] || angle > acceptableRange[1])) {
-        isPostureCorrect = false
-        this.notifyUserWrongPosture(keyPoint.name, angle)
+      // Check if angle is within exercise-specific thresholds
+      const downThreshold = this.exercise.thresholds.down?.[keyPoint.name]
+      const upThreshold = this.exercise.thresholds.up?.[keyPoint.name]
+      
+      if (this.exercise.countingLogic.countOn === "up") {
+        if (upThreshold && angle < upThreshold) {
+          isPostureCorrect = false
+          this.notifyUserWrongPosture(
+            keyPoint.name, 
+            angle, 
+            `${this.exercise.validation.incorrect}\nExtend more to reach ${upThreshold} degrees`
+          )
+        }
+        if (downThreshold && angle > downThreshold) {
+          isPostureCorrect = false
+          this.notifyUserWrongPosture(
+            keyPoint.name, 
+            angle, 
+            `${this.exercise.validation.incorrect}\nLower to reach ${downThreshold} degrees`
+          )
+        }
       }
     }
 
-    // Check thresholds
+    // Verify all required keypoints are measured
+    const hasAllRequiredPoints = this.exercise.countingLogic.requirements.every(
+      req => angles.has(req)
+    )
+    if (!hasAllRequiredPoints) {
+      throw new Error("Missing required keypoints for exercise validation")
+    }
+
+    // Check position thresholds based on counting logic
     const isDown = this.exercise.thresholds.down && 
-      Object.entries(this.exercise.thresholds.down).every(([key, threshold]) => {
-        const angle = angles.get(key)
-        return angle !== undefined && angle <= threshold
-      })
+      Object.entries(this.exercise.thresholds.down)
+        .filter(([key]) => this.exercise.countingLogic.requirements.includes(key))
+        .every(([key, threshold]) => {
+          const angle = angles.get(key)
+          return angle !== undefined && angle <= threshold
+        })
 
     const isUp = this.exercise.thresholds.up && 
-      Object.entries(this.exercise.thresholds.up).every(([key, threshold]) => {
-        const angle = angles.get(key)
-        return angle !== undefined && angle >= threshold
-      })
+      Object.entries(this.exercise.thresholds.up)
+        .filter(([key]) => this.exercise.countingLogic.requirements.includes(key))
+        .every(([key, threshold]) => {
+          const angle = angles.get(key)
+          return angle !== undefined && angle >= threshold
+        })
 
-    // Update count based on counting logic
-    if (this.exercise.countingLogic.countOn === "up") {
-      if (isUp && !this.isInUpPosition) {
-        this.isInUpPosition = true
-        this.isInDownPosition = false
-      } else if (isDown && this.isInUpPosition && !this.isInDownPosition) {
-        this.totalCount++
-        this.isInUpPosition = false
-        this.isInDownPosition = true
-      }
+    // Update count based on exercise-specific counting logic
+    switch (this.exercise.countingLogic.countOn) {
+      case "up":
+        if (isUp && !this.isInUpPosition) {
+          this.isInUpPosition = true
+          this.isInDownPosition = false
+          if (isPostureCorrect) {
+            this.notifyUserCorrectPosture()
+          }
+        } else if (isDown && this.isInUpPosition && !this.isInDownPosition) {
+          if (isPostureCorrect) {
+            this.totalCount++
+            this.notifyUserCorrectPosture()
+          }
+          this.isInUpPosition = false
+          this.isInDownPosition = true
+        }
+        break;
+
+      case "hold":
+        if (isPostureCorrect) {
+          const elapsedTime = (Date.now() - this.startTime) / 1000
+          if (elapsedTime >= (this.exercise.countingLogic.duration || 0)) {
+            this.totalCount = 1
+            this.notifyUserCorrectPosture()
+          }
+        } else {
+          this.startTime = Date.now()
+        }
+        break;
     }
 
     if (!isPostureCorrect) {
@@ -109,9 +155,17 @@ export class ExerciseProcessor {
 
   private processDistanceBasedExercise(landmarks: NormalizedLandmark[]): void {
     const distances = new Map<string, number>()
+    let isPostureCorrect = true
 
-    // Calculate distances for all keypoints
+    // Calculate distances for required keypoints
     for (const keyPoint of this.exercise.keyPoints) {
+      if (keyPoint.type !== "distance") continue
+
+      // Skip if keypoint is not in requirements
+      if (!this.exercise.countingLogic.requirements.includes(keyPoint.name)) {
+        continue
+      }
+
       const distance = this.calculateDistance(
         landmarks[keyPoint.landmarks[0]],
         landmarks[keyPoint.landmarks[1]]
@@ -119,25 +173,72 @@ export class ExerciseProcessor {
       distances.set(keyPoint.name, distance)
     }
 
+    // Verify all required keypoints are measured
+    const hasAllRequiredPoints = this.exercise.countingLogic.requirements.every(
+      req => distances.has(req)
+    )
+    if (!hasAllRequiredPoints) {
+      throw new Error("Missing required keypoints for exercise validation")
+    }
+
     const isExtended = this.exercise.thresholds.extended &&
-      Object.entries(this.exercise.thresholds.extended).every(([key, threshold]) => {
-        const distance = distances.get(key)
-        return distance !== undefined && distance >= threshold
-      })
+      Object.entries(this.exercise.thresholds.extended)
+        .filter(([key]) => this.exercise.countingLogic.requirements.includes(key))
+        .every(([key, threshold]) => {
+          const distance = distances.get(key)
+          if (distance === undefined) return false
+          
+          if (distance < threshold) {
+            isPostureCorrect = false
+            this.notifyUserWrongPosture(
+              key,
+              distance,
+              `${this.exercise.validation.incorrect}\nExtend further to reach ${threshold}`
+            )
+            return false
+          }
+          return true
+        })
 
     const isClosed = this.exercise.thresholds.closed &&
-      Object.entries(this.exercise.thresholds.closed).every(([key, threshold]) => {
-        const distance = distances.get(key)
-        return distance !== undefined && distance <= threshold
-      })
+      Object.entries(this.exercise.thresholds.closed)
+        .filter(([key]) => this.exercise.countingLogic.requirements.includes(key))
+        .every(([key, threshold]) => {
+          const distance = distances.get(key)
+          if (distance === undefined) return false
+          
+          if (distance > threshold) {
+            isPostureCorrect = false
+            this.notifyUserWrongPosture(
+              key,
+              distance,
+              `${this.exercise.validation.incorrect}\nClose position to reach ${threshold}`
+            )
+            return false
+          }
+          return true
+        })
 
-    if (this.exercise.countingLogic.countOn === "closed") {
-      if (isExtended && !this.isInExtendedPosition) {
-        this.isInExtendedPosition = true
-      } else if (isClosed && this.isInExtendedPosition) {
-        this.totalCount++
-        this.isInExtendedPosition = false
-      }
+    // Update count based on exercise-specific counting logic
+    switch (this.exercise.countingLogic.countOn) {
+      case "closed":
+        if (isExtended && !this.isInExtendedPosition) {
+          this.isInExtendedPosition = true
+          if (isPostureCorrect) {
+            this.notifyUserCorrectPosture()
+          }
+        } else if (isClosed && this.isInExtendedPosition) {
+          if (isPostureCorrect) {
+            this.totalCount++
+            this.notifyUserCorrectPosture()
+          }
+          this.isInExtendedPosition = false
+        }
+        break;
+    }
+
+    if (!isPostureCorrect) {
+      this.notifyUserIncorrectPosture()
     }
   }
 
@@ -146,41 +247,103 @@ export class ExerciseProcessor {
       this.startTime = Date.now()
     }
 
-    const distances = new Map<string, number>()
-    for (const keyPoint of this.exercise.keyPoints) {
-      const distance = this.calculateDistance(
-        landmarks[keyPoint.landmarks[0]],
-        landmarks[keyPoint.landmarks[1]]
-      )
-      distances.set(keyPoint.name, distance)
+    let isPostureCorrect = true
+    const angles = new Map<string, number>()
+
+    // Verify all required keypoints are present
+    const hasAllRequiredPoints = this.exercise.countingLogic.requirements.every(
+      req => this.exercise.keyPoints.find(kp => kp.name === req)
+    )
+    if (!hasAllRequiredPoints) {
+      throw new Error("Missing required keypoints for exercise validation")
     }
 
-    const isCorrectPosition = this.exercise.thresholds.correct &&
-      Object.entries(this.exercise.thresholds.correct).every(([key, threshold]) => {
-        const distance = distances.get(key)
-        return distance !== undefined && distance <= threshold
-      })
+    // Calculate angles between required sequential keypoints
+    for (let i = 0; i < this.exercise.keyPoints.length - 2; i++) {
+      const point1 = this.exercise.keyPoints[i]
+      const point2 = this.exercise.keyPoints[i + 1]
+      const point3 = this.exercise.keyPoints[i + 2]
 
-    if (isCorrectPosition) {
-      const elapsedSeconds = (Date.now() - this.startTime) / 1000
-      if (elapsedSeconds >= (this.exercise.countingLogic.duration || 0)) {
-        this.totalCount = 1
+      // Skip if any point is not in requirements
+      if (!this.exercise.countingLogic.requirements.includes(point1.name) ||
+          !this.exercise.countingLogic.requirements.includes(point2.name) ||
+          !this.exercise.countingLogic.requirements.includes(point3.name)) {
+        continue
       }
-    } else {
-      this.startTime = Date.now()
+
+      const angle = this.calculateAngle(
+        landmarks[point1.landmarks[0]],
+        landmarks[point2.landmarks[0]],
+        landmarks[point3.landmarks[0]]
+      )
+      
+      const segmentName = `${point1.name}-${point2.name}-${point3.name}`
+      angles.set(segmentName, angle)
+
+      // Check if angle is within the exercise's min/max thresholds
+      const minAngle = this.exercise.thresholds.minPoseAngle
+      const maxAngle = this.exercise.thresholds.maxPoseAngle
+
+      if (minAngle && maxAngle) {
+        if (angle < minAngle || angle > maxAngle) {
+          isPostureCorrect = false
+          this.notifyUserWrongPosture(
+            segmentName,
+            angle,
+            `${this.exercise.validation.incorrect}\nMaintain angle between ${minAngle}° and ${maxAngle}°`
+          )
+        }
+      }
+
+      // Check for any position-specific thresholds
+      const correctThreshold = this.exercise.thresholds.correct?.[segmentName]
+      if (correctThreshold !== undefined) {
+        const isCorrect = angle <= correctThreshold
+        if (!isCorrect) {
+          isPostureCorrect = false
+          this.notifyUserWrongPosture(
+            segmentName,
+            angle,
+            `${this.exercise.validation.incorrect}\nAdjust position to reach ${correctThreshold}°`
+          )
+        }
+      }
+    }
+
+    // Handle hold-based counting logic
+    if (this.exercise.countingLogic.countOn === "hold") {
+      if (isPostureCorrect) {
+        const elapsedSeconds = (Date.now() - this.startTime) / 1000
+        if (elapsedSeconds >= (this.exercise.countingLogic.duration || 0)) {
+          this.totalCount = 1
+          this.notifyUserCorrectPosture()
+        }
+      } else {
+        this.startTime = Date.now()
+      }
+    }
+
+    if (!isPostureCorrect) {
+      this.notifyUserIncorrectPosture()
     }
   }
 
-  private notifyUserWrongPosture(keyPointName: string, angle: number): void {
-    console.warn(`Incorrect posture detected at ${keyPointName}. Current angle: ${angle}`)
+  private notifyUserCorrectPosture(): void {
+    console.info(this.exercise.validation.correct)
   }
 
   private notifyUserIncorrectPosture(): void {
-    console.warn('You are performing the exercise with incorrect posture!')
+    console.warn(this.exercise.validation.incorrect)
+  }
+
+  private notifyUserWrongPosture(keyPointName: string, angle: number, message?: string): void {
+    console.warn(`Incorrect posture at ${keyPointName}. Current angle: ${angle}°. ${message || ''}`)
   }
 
   processExercise(landmarks: NormalizedLandmark[]): void {
-    if (landmarks.length < 33) return
+    if (landmarks.length < 33) {
+      throw new Error("Insufficient landmarks detected. Please ensure your full body is visible.")
+    }
 
     switch (this.exercise.countingLogic.type) {
       case "angle_threshold":
@@ -192,6 +355,8 @@ export class ExerciseProcessor {
       case "position_threshold":
         this.processPositionBasedExercise(landmarks)
         break
+      default:
+        throw new Error(`Unsupported exercise type: ${this.exercise.countingLogic.type}`)
     }
   }
 

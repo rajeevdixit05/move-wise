@@ -3,18 +3,17 @@ import { Card, CardContent } from "@/components/ui/card"
 import { ArrowLeft, ArrowRight, Dumbbell, Heart, Timer } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
-import { Exercise } from "../../types/exerciseTypes"
+import { Exercise } from "@/types/exerciseTypes"
 import { ExerciseCarousel } from "../components/ExerciseCarousel"
 import { headers } from 'next/headers'
 import { exercises } from './api/exercise-config/route'
 
 async function getExercises(): Promise<Partial<Exercise>[]> {
-  // Return simplified exercises directly
-  return exercises.map(({ exerciseId, name, description }) => ({
+  return exercises.map(({ exerciseId, name, description, image }) => ({
     exerciseId,
     name,
     description,
-    image: `/exercises/${exerciseId}.jpg`
+    image: image || `/exercises/${exerciseId}.jpg`
   }))
 }
 

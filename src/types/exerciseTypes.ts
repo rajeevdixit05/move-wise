@@ -1,34 +1,49 @@
 export interface Exercise {
-  exerciseId: string
-  meta: ExerciseMeta
-  calorieFormula: CalorieFormula
-  keyPoints: KeyPoint[]
-  thresholds: ExerciseThresholds
-  countingLogic: CountingLogic
-}
-
-interface ExerciseMeta {
-  name: string
-  description: string
-  image: string
+  exerciseId: string;
+  name: string;
+  description: string;
+  image?: string;
   validation: {
-    correct: string
-    incorrect: string
-  }
-  difficulty: "beginner" | "intermediate" | "advanced"
-  muscleGroups: string[]
-  equipment: string
+    correct: string;
+    incorrect: string;
+  };
+  difficulty?: string;
+  muscleGroups?: string[];
+  equipment?: string;
+  calorieFormula: {
+    formula: string;
+    unit: string;
+    variables: Record<string, string>;
+  };
+  keyPoints: Array<{
+    name: string;
+    landmarks: number[];
+    type: "angle" | "distance" | "POSITION";
+    unit: string;
+  }>;
+  thresholds: {
+    down?: Record<string, number>;
+    up?: Record<string, number>;
+    extended?: Record<string, number>;
+    closed?: Record<string, number>;
+    minPoseAngle?: number;
+    maxPoseAngle?: number;
+    correct?: Record<string, number>;
+  };
+  countingLogic: {
+    type: "angle_threshold" | "distance_threshold" | "position_threshold";
+    countOn: "up" | "closed" | "hold";
+    requirements: string[];
+    resetOn?: string;
+    duration?: number;
+  };
 }
 
-export interface KeyPoint {
-  name: string
-  landmarks: number[]
-  type: string
-  unit: string
+export interface FitnessInsight {
+  exerciseId: string;
+  userId: string;
+  reps: number;
+  calories: number;
+  duration: number;
+  timestamp: string;
 }
-
-interface CalorieFormula {
-  formula: string
-  unit: string
-  variables: Record<string, string>
-} 
